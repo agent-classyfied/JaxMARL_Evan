@@ -216,6 +216,67 @@ def buffer_sample(
 
     return batch, rng
 
+def buffer_sample_prioritized(
+    state:                BufferState,
+    batch_size:           int,
+    rng:                  chex.PRNGKey,
+    priority_reward_weight: float = 10.0,
+) -> Tuple[Batch, chex.PRNGKey]:
+    """Sample a minibatch with higher probability for non-zero reward transitions.
+
+    Transitions with any non-zero reward (shaped or sparse) are upweighted
+    by priority_reward_weight relative to zero-reward transitions. This
+    addresses the sparse reward problem where a uniformly sampled batch
+    contains <1% non-zero reward transitions, causing the critic to
+    converge to Q≈0.
+
+    Args:
+        state:                  current BufferState (must have size >= batch_size)
+        batch_size:             number of transitions to sample
+        rng:                    JAX PRNG key
+        priority_reward_weight: how many times more likely to sample a
+                                non-zero reward transition vs a zero one.
+                                10.0 means reward transitions are 10x
+                                more likely to be sampled.
+
+    Returns:
+        batch:   Batch NamedTuple of JAX arrays with leading dim B
+        new_rng: updated PRNG key for the caller to use next
+    """
+    if state.size < batch_size:
+        raise ValueError(
+            f"Buffer has {state.size} transitions, need {batch_size} to sample."
+        )
+
+    rng, sample_key = jax.random.split(rng)
+
+    # rewards shape: (capacity, N) — sum over agents to get per-transition signal
+    rewards_slice = state.rewards[:state.size]           # (size, N)
+    has_reward    = np.abs(rewards_slice).sum(axis=1) > 0  # (size,) bool
+
+    # Build sampling weights: upweight reward transitions
+    weights = np.where(has_reward, float(priority_reward_weight), 1.0)
+    weights = weights / weights.sum()   # normalise to valid probability dist
+
+    # np.random.choice supports weighted sampling; use numpy for this
+    # since it's outside the JAX trace boundary anyway
+    seed = int(jax.random.randint(sample_key, (), 0, 2**31 - 1))
+    rng_np = np.random.default_rng(seed)
+    idxs_np = rng_np.choice(state.size, size=batch_size, replace=True, p=weights)
+
+    batch = Batch(
+        obs=            jnp.array(state.obs[idxs_np]),
+        prev_msgs=      jnp.array(state.prev_msgs[idxs_np]),
+        actions=        jnp.array(state.actions[idxs_np]),
+        msgs=           jnp.array(state.msgs[idxs_np]),
+        rewards=        jnp.array(state.rewards[idxs_np]),
+        next_obs=       jnp.array(state.next_obs[idxs_np]),
+        next_prev_msgs= jnp.array(state.next_prev_msgs[idxs_np]),
+        dones=          jnp.array(state.dones[idxs_np]),
+    )
+
+    return batch, rng
+
 
 def buffer_size(state: BufferState) -> int:
     """Return the number of valid transitions currently stored."""
