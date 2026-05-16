@@ -19,7 +19,7 @@ import jax.numpy as jnp
 from jaxmarl.environments.overcooked_v3.overcooked import OvercookedV3, State
 
 from networks import ISAgentNet, ISCriticNet
-from buffer import buffer_init, buffer_add, buffer_is_ready, buffer_sample
+from buffer import buffer_init, buffer_add, buffer_is_ready, buffer_sample, buffer_sample_prioritized
 from update import TrainState, UpdateMetrics, init_train_state, train_step
 from loss import received_messages
 from train import save_checkpoint, DEFAULT_CONFIG
@@ -109,7 +109,7 @@ def make_overcooked_config(layout: str, args: argparse.Namespace, env_info: dict
         # ── IS-MADDPG hyperparameters ────────────────────────────────────
         # msg_dim=32: lightweight intention signal
         # horizon_H=5: ~one pick-up+place cycle in Overcooked timing
-        "MSG_DIM":          16,
+        "MSG_DIM":          5,
         "HORIZON_H":        5,
         "HIDDEN_DIM":       128,
         "ACTOR_LR":         1e-4,
@@ -124,8 +124,8 @@ def make_overcooked_config(layout: str, args: argparse.Namespace, env_info: dict
         # ── Training schedule ────────────────────────────────────────────
         "TOTAL_TIMESTEPS":  args.total_timesteps,
         "NUM_ENVS":         args.num_envs,
-        "BATCH_SIZE":       512,
-        "BUFFER_SIZE":      100_000,
+        "BATCH_SIZE":       128,
+        "BUFFER_SIZE":      300_000,
         "LEARNING_STARTS":  5_000,
         "UPDATE_EVERY":     1,
         "UPDATES_PER_STEP": 1,
@@ -659,13 +659,13 @@ def run(config: dict, env_vec: OvercookedV3,
                     rv = float(jnp.array(rewards_dict[aid])[e])
 
                     # Infer reward type from value
-                    if sv == 6.0:
+                    if sv == 12.0:
                         ep_reward_types["soup_in_dish"][e] += 1
                     # elif sv == 4.0:
                     #     ep_reward_types["pot_start_cooking"][e] += 1
-                    elif sv == 3.0:
+                    elif sv == 6.0:
                         ep_reward_types["placement_in_pot"][e] += 1
-                    elif sv == 2.0:
+                    elif sv == 4.0:
                         ep_reward_types["plate_pickup"][e] += 1
 
                     if rv == 20.0:
@@ -740,7 +740,7 @@ def run(config: dict, env_vec: OvercookedV3,
                     )
                     compile_start = time.time()
 
-                batch, rng = buffer_sample(buffer_state, batch_size, rng)
+                batch, rng = buffer_sample_prioritized(buffer_state, batch_size, rng, priority_reward_weight=10.0)
                 train_state, last_metrics = jit_train_step(train_state, batch)
 
                 if not first_update_done:
@@ -913,17 +913,17 @@ def run(config: dict, env_vec: OvercookedV3,
 
         reward_labels = {
             "delivery":          f"Delivery (+20)",
-            # "placement_in_pot":  f"Placement in Pot (+3)",
-            "plate_pickup":      f"Plate Pickup (+2)",
-            "pot_start_cooking": f"Pot Start Cooking (+4)",
-            "soup_in_dish":      f"Soup in Dish (+6)",
+            "placement_in_pot":  f"Placement in Pot (+6)",
+            "plate_pickup":      f"Plate Pickup (+4)",
+            # "pot_start_cooking": f"Pot Start Cooking (+4)",
+            "soup_in_dish":      f"Soup in Dish (+12)",
             # "burn_penalty":      f"Burn Penalty (-5)",
         }
         colors = {
             "delivery":          "green",
-            # "placement_in_pot":  "steelblue",
+            "placement_in_pot":  "steelblue",
             "plate_pickup":      "yellow",
-            "pot_start_cooking": "orange",
+            # "pot_start_cooking": "orange",
             "soup_in_dish":      "purple",
             # "burn_penalty":      "red",
         }
@@ -1006,7 +1006,7 @@ def main():
         help="Overcooked layout"
     )
     parser.add_argument(
-        "--total_timesteps", type=int, default=500_000,
+        "--total_timesteps", type=int, default=1_000_000,
         help="Total environment steps"
     )
     parser.add_argument(

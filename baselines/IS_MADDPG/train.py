@@ -11,7 +11,7 @@ from functools import partial
 from typing import Dict, Any, Optional
 
 from networks import ISAgentNet, ISCriticNet
-from buffer import BufferState, Batch, buffer_init, buffer_add, buffer_sample, buffer_is_ready
+from buffer import BufferState, Batch, buffer_init, buffer_add, buffer_sample, buffer_is_ready, buffer_sample_prioritized
 from update import TrainState, UpdateMetrics, init_train_state, train_step, polyak_update
 from loss import received_messages
 
@@ -559,7 +559,7 @@ def make_train(config: dict, env_vec, env_eval, monitor=None):
 
                 for _ in range(updates_per):
                     rng, sample_rng = jax.random.split(rng)
-                    batch, rng = buffer_sample(buffer_state, batch_size, rng)
+                    batch, rng = buffer_sample_prioritized(buffer_state, batch_size, rng, priority_reward_weight=10.0)
                     train_state, last_metrics = jit_train_step(train_state, batch)
                     total_updates += 1
 
