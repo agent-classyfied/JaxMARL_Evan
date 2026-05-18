@@ -744,7 +744,6 @@ def run(config: dict, env_vec: OvercookedV3,
         if (buffer_is_ready(buffer_state, batch_size)
                 and global_step >= learn_start
                 and t % update_every == 0):
-            t0 = time.time()
 
             for _ in range(updates_per):
                 # Warn once that JIT compilation is about to happen
@@ -754,7 +753,8 @@ def run(config: dict, env_vec: OvercookedV3,
                         f"JIT compiling train_step (may take 1-3 min)..."
                     )
                     compile_start = time.time()
-
+                
+                t0 = time.time()
                 batch, rng = buffer_sample_prioritized(buffer_state, batch_size, rng, priority_reward_weight=10.0)
                 train_state, last_metrics = jit_train_step(train_state, batch)
                 jax.block_until_ready(train_state.actor_params)  # force sync
