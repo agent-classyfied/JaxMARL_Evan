@@ -583,8 +583,6 @@ def run(config: dict, env_vec: OvercookedV3,
     eval_interval_steps = max(1, int(config["TOTAL_TIMESTEPS"] * config["TEST_INTERVAL"]))  
 
 
-    import time
-
     t_step   = 0.0  # env stepping
     t_buffer = 0.0  # buffer adds
     t_train  = 0.0  # gradient updates
@@ -622,7 +620,7 @@ def run(config: dict, env_vec: OvercookedV3,
         )
         jax.block_until_ready(next_obs_dict)   # force sync for accurate timing
         t_step += time.time() - t0
-        print(f"First jit_step: {time.time()-t0:.1f}s (includes compilation)")
+        # print(f"First jit_step: {time.time()-t0:.1f}s (includes compilation)")
 
         # check rewards used
         if t == 1:
