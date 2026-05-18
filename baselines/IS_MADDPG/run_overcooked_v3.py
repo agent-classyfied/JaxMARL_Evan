@@ -580,9 +580,18 @@ def run(config: dict, env_vec: OvercookedV3,
     compile_start = None
 
     last_eval_step = 0
-    eval_interval_steps = max(1, int(config["TOTAL_TIMESTEPS"] * config["TEST_INTERVAL"]))    
+    eval_interval_steps = max(1, int(config["TOTAL_TIMESTEPS"] * config["TEST_INTERVAL"]))  
+
+
+    import time
+
+    t_step   = 0.0  # env stepping
+    t_buffer = 0.0  # buffer adds
+    t_train  = 0.0  # gradient updates
+    t_other  = 0.0  # everything else      
 
     for t in range(1, total_steps_target + 1):
+        t_loop_start = time.time()
         global_step = t * num_envs 
 
         # ── Epsilon schedule ─────────────────────────────────────────
@@ -607,9 +616,14 @@ def run(config: dict, env_vec: OvercookedV3,
             f"agent_{i}": jnp.array(actions_idx[:, i])
             for i in range(num_agents)
         }
+        t0 = time.time()
         next_obs_dict, env_states, rewards_dict, dones_dict, info = jit_step(
         step_rngs, env_states, action_dict
         )
+        jax.block_until_ready(next_obs_dict)   # force sync for accurate timing
+        t_step += time.time() - t0
+        print(f"First jit_step: {time.time()-t0:.1f}s (includes compilation)")
+
         # check rewards used
         if t == 1:
             print("rewards_dict sample:")
@@ -637,6 +651,7 @@ def run(config: dict, env_vec: OvercookedV3,
             rewards_all = rewards_dict_to_array(rewards_dict, agent_ids, num_envs)            
 
         # ── Buffer ───────────────────────────────────────────────────
+        t0 = time.time()
         for e in range(num_envs):
             buffer_state = buffer_add(
                 buffer_state,
@@ -649,6 +664,7 @@ def run(config: dict, env_vec: OvercookedV3,
                 next_prev_msgs=msgs[e],
                 done=          bool(dones_all[e]),
             )
+        t_buffer += time.time() - t0
 
         # ── Reward type tracking ──────────────────────────────────────
         if "shaped_reward" in info:
@@ -730,6 +746,7 @@ def run(config: dict, env_vec: OvercookedV3,
         if (buffer_is_ready(buffer_state, batch_size)
                 and global_step >= learn_start
                 and t % update_every == 0):
+            t0 = time.time()
 
             for _ in range(updates_per):
                 # Warn once that JIT compilation is about to happen
@@ -742,6 +759,8 @@ def run(config: dict, env_vec: OvercookedV3,
 
                 batch, rng = buffer_sample_prioritized(buffer_state, batch_size, rng, priority_reward_weight=10.0)
                 train_state, last_metrics = jit_train_step(train_state, batch)
+                jax.block_until_ready(train_state.actor_params)  # force sync
+                t_train += time.time() - t0
 
                 if not first_update_done:
                     # block_until_ready forces JAX to finish compilation
@@ -776,6 +795,15 @@ def run(config: dict, env_vec: OvercookedV3,
                 f"({buf_pct:.1f}%)  eps={epsilon:.3f}",
                 flush=True,
             )
+        
+        # Print breakdown every 500 steps
+        if t % 1000 == 0 and t > 0:
+            total = t_step + t_buffer + t_train
+            print(f"\n[t={t}] Time breakdown:")
+            print(f"  env step    : {t_step:.1f}s  ({100*t_step/total:.0f}%)")
+            print(f"  buffer add  : {t_buffer:.1f}s  ({100*t_buffer/total:.0f}%)")
+            print(f"  train step  : {t_train:.1f}s  ({100*t_train/total:.0f}%)")
+            t_step = t_buffer = t_train = 0.0
 
         # ── Logging every log_every steps ────────────────────────────
         if t % log_every == 0 and first_update_done:
