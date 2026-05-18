@@ -618,7 +618,7 @@ def run(config: dict, env_vec: OvercookedV3,
         next_obs_dict, env_states, rewards_dict, dones_dict, info = jit_step(
         step_rngs, env_states, action_dict
         )
-        jax.block_until_ready(next_obs_dict)   # force sync for accurate timing
+        # jax.block_until_ready(next_obs_dict)   # force sync for accurate timing
         t_step += time.time() - t0
         # print(f"First jit_step: {time.time()-t0:.1f}s (includes compilation)")
 
@@ -757,7 +757,7 @@ def run(config: dict, env_vec: OvercookedV3,
                 t0 = time.time()
                 batch, rng = buffer_sample_prioritized(buffer_state, batch_size, rng, priority_reward_weight=10.0)
                 train_state, last_metrics = jit_train_step(train_state, batch)
-                jax.block_until_ready(train_state.actor_params)  # force sync
+                # jax.block_until_ready(train_state.actor_params)  # force sync
                 t_train += time.time() - t0
 
                 if not first_update_done:
