@@ -559,7 +559,8 @@ def make_train(config: dict, env_vec, env_eval, monitor=None):
 
                 for _ in range(updates_per):
                     rng, sample_rng = jax.random.split(rng)
-                    batch, rng = buffer_sample_prioritized(buffer_state, batch_size, rng, priority_reward_weight=10.0)
+                    # batch, rng = buffer_sample_prioritized(buffer_state, batch_size, rng, priority_reward_weight=10.0)
+                    batch, rng = buffer_sample(buffer_state, batch_size, rng)
                     train_state, last_metrics = jit_train_step(train_state, batch)
                     total_updates += 1
 
